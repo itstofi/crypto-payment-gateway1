@@ -1,0 +1,160 @@
+name: Deploy DEV
+on:
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set ENV
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            echo "SERVER_HOST=${{ vars.PROD_SERVER_HOST }}" >> $GITHUB_ENV
+            echo "SERVER_USERNAME=${{ vars.PROD_SERVER_USERNAME }}" >> $GITHUB_ENV
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            echo "SERVER_HOST=${{ vars.DEV_SERVER_HOST }}" >> $GITHUB_ENV
+            echo "SERVER_USERNAME=${{ vars.DEV_SERVER_USERNAME }}" >> $GITHUB_ENV
+          fi
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ env.SERVER_HOST }}
+          username: ${{ env.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ vars.SSH_PORT }}
+          script: |
+            export DATABASE_URL=${{ secrets.DATABASE_URL }}
+            export DATABASE_URL_LOCAL=${{ secrets.DATABASE_URL_LOCAL }}
+            export DATABASE_URL_DEV=${{ secrets.DEV_PDATABASE_URL }}
+            export DATABASE_URL_PROD=${{ secrets.PROD_PDATABASE_URL }}
+            export POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            export JWT_SIGNATURE=${{ secrets.JWT_SIGNATURE }}
+            export CLIENT_ID=${{ secrets.CLIENT_ID }}
+            export CLIENT_SECRET=${{ secrets.CLIENT_SECRET }}
+            echo "--------"
+            echo "### CMD: cd EcoWheel"
+            cd EcoWheel
+            echo "Done!"
+            echo "--------"
+            echo "### CMD: git reset --hard"
+            git reset --hard
+            echo "Done!"
+            echo "--------"
+            echo "### CMD: find . -name 'package-lock.json' -exec rm -f {} +"
+            find . -name 'package-lock.json' -exec rm -f {} +
+            echo "### CMD: find . -name 'yarn.lock' -exec rm -f {} +"
+            find . -name 'yarn.lock' -exec rm -f {} +
+            echo "Done!"
+            echo "--------"
+            branch_name=$(basename "${{ github.ref }}")
+            echo "### CMD: git switch $branch_name"
+            git switch "$branch_name"
+            echo "Done!"
+            echo "--------"
+            echo "### CMD: git pull origin $branch_name"
+            git pull origin $branch_name
+            echo "Done!"
+            echo "--------"
+            echo "### CMD: npm install &deploy.txt& yarn install"
+            npm install && yarn install
+            echo "Done!"
+            echo "--------"
+            echo "### CMD: cd ~/EcoWheel/api && cp .env.example .env"
+            cd ~/EcoWheel/api && cp .env.example .env
+            echo "Done!"
+            echo "--------"
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              echo "start deploying in ${{ github.ref }}"
+
+              echo "### CMD: change VITE_MODE to prod"
+              sed -i 's/^VITE_MODE=.*/VITE_MODE=prod/' ~/EcoWheel/frontend/.env
+              echo "Done!"
+
+              echo "### CMD: change DB_MODE/NODE_ENV to local"
+              sed -i 's/^NODE_ENV=.*/NODE_ENV=prod/' ~/EcoWheel/api/.env
+              sed -i 's/^DB_MODE=.*/DB_MODE=local/' ~/EcoWheel/api/.env
+              echo "Done!"
+
+              echo "### CMD: cd ~/EcoWheel/admin && yarn build"
+              cd ~/EcoWheel/admin && yarn build
+              echo "### CMD: pm2 reload startadmin --update-env"
+              pm2 reload startadmin --update-env
+
+              echo "### CMD: cd ~/EcoWheel/api && yarn build"
+              cd ~/EcoWheel/api && yarn build
+              echo "### CMD: pm2 reload startapi --update-env"
+              pm2 reload startapi --update-env
+
+              echo "### CMD: cd ~/EcoWheel/frontend && yarn build"
+              cd ~/EcoWheel/frontend && yarn build
+              echo "### CMD: pm2 reload startfrontend --update-env"
+              pm2 reload startfrontend --update-env
+
+              echo "### CMD: pm2 reload prisma --update-env"
+              pm2 reload prisma --update-env
+
+              echo "### CMD: update deploy.txt"
+              echo "---------------------------" >> deploy.txt
+              echo "Date: $(date)" >> deploy.txt
+              echo "Branch: ${{ github.ref }}" >> deploy.txt
+              echo "Last Commit Message: ${{ github.event.head_commit.message }}" >> deploy.txt
+              echo "Last Commit Author: ${{ github.event.head_commit.author.name }}" >> deploy.txt
+              echo "Pusher: ${{ github.actor }}" >> deploy.txt
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                echo "Pull Request Author: ${{ github.event.pull_request.user.login }}" >> deploy.txt
+                echo "Merged By: ${{ github.event.pull_request.merged_by.login }}" >> deploy.txt
+              fi
+              echo "### CMD: cp deploy.txt dist/deploy.txt"
+              cp deploy.txt dist/deploy.txt
+              echo "Done!"
+            fi
+            if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+              echo "start deploying in ${{ github.ref }}"
+
+              echo "### CMD: change VITE_MODE to dev"
+              sed -i 's/^VITE_MODE=.*/VITE_MODE=dev/' ~/EcoWheel/frontend/.env
+              echo "Done!"
+
+              echo "### CMD: change DB_MODE/NODE_ENV to local"
+              sed -i 's/^NODE_ENV=.*/NODE_ENV=dev/' ~/EcoWheel/api/.env
+              sed -i 's/^DB_MODE=.*/DB_MODE=local/' ~/EcoWheel/api/.env
+              echo "Done!"
+
+              echo "### CMD: cd ~/EcoWheel/admin && yarn build"
+              cd ~/EcoWheel/admin && yarn build
+              echo "### CMD: pm2 reload startadmin --update-env"
+              pm2 reload startadmin --update-env
+
+              echo "### CMD: cd ~/EcoWheel/api && yarn build"
+              cd ~/EcoWheel/api && yarn build
+              echo "### CMD: pm2 reload startapi --update-env"
+              pm2 reload startapi --update-env
+
+              echo "### CMD: cd ~/EcoWheel/frontend && yarn build"
+              cd ~/EcoWheel/frontend && yarn build
+              echo "### CMD: pm2 reload startfrontend --update-env"
+              pm2 reload startfrontend --update-env
+
+              echo "### CMD: pm2 reload prisma --update-env"
+              pm2 reload prisma --update-env
+
+              echo "### CMD: update deploy.txt"
+              echo "---------------------------" >> deploy.txt
+              echo "Date: $(date)" >> deploy.txt
+              echo "Branch: ${{ github.ref }}" >> deploy.txt
+              echo "Last Commit Message: ${{ github.event.head_commit.message }}" >> deploy.txt
+              echo "Last Commit Author: ${{ github.event.head_commit.author.name }}" >> deploy.txt
+              echo "Pusher: ${{ github.actor }}" >> deploy.txt
+              if [ "${{ github.event_name }}" = "pull_request" ]; then
+                echo "Pull Request Author: ${{ github.event.pull_request.user.login }}" >> deploy.txt
+                echo "Merged By: ${{ github.event.pull_request.merged_by.login }}" >> deploy.txt
+              fi
+              echo "### CMD: cp deploy.txt dist/deploy.txt"
+              cp deploy.txt dist/deploy.txt
+              echo "Done!"
+            fi
+            echo "--------"
